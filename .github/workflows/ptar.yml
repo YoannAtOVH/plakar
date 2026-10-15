@@ -1,0 +1,224 @@
+# Connector packages (.ptar) on GitHub, aligned with the release tags of
+# upstream plakar.
+#
+# Meant for a fork of PlakarKorp/plakar that carries packaging/ptar.  The fork's
+# own plakar sources are not used: plakar is built from a tag of
+# PlakarKorp/plakar, checked out below, so the packages are assembled by the very
+# release they are meant for.  The recipes and build-ptar.sh come from the fork.
+# The result is one artifact per tag, ptar-<tag>, holding the packages and their
+# checksums.
+#
+#     gh workflow run ptar.yml                         # newest stable upstream tag
+#     gh workflow run ptar.yml -f plakar_ref=v1.1.6    # another tag
+#     gh run download --name ptar-v1.1.7               # fetch the packages
+#
+# Two things about the fork, both deliberate:
+#   * workflow_dispatch and schedule only work from the default branch, so the
+#     branch that carries this file has to be the default branch.
+#   * do not push upstream's v* tags to it: .github/workflows/release.yml would
+#     run GoReleaser on each of them.  Nothing here needs them -- the tag is read
+#     from PlakarKorp/plakar directly.
+#
+# The smoke test in build-ptar.sh installs with `pkg add -allow-unsigned`, a flag
+# plakar has had since v1.1.5: older tags cannot be packaged this way.
+
+name: ptar
+
+on:
+  workflow_dispatch:
+    inputs:
+      plakar_ref:
+        description: 'Tag (or branch) of PlakarKorp/plakar to build with. Empty: the newest stable tag.'
+        required: false
+        default: ''
+      recipes:
+        description: 'Recipes to package, space separated. Empty: all of them.'
+        required: false
+        default: ''
+      platforms:
+        description: 'Targets, space separated os/arch.'
+        required: false
+        default: 'linux/amd64 darwin/arm64 windows/amd64'
+  schedule:
+    # Daily, off the hour.  Builds the newest stable upstream tag unless the
+    # artifact of that tag is already there.
+    - cron: '23 5 * * *'
+  push:
+    branches:
+      - ptar-packaging
+    paths:
+      - packaging/ptar/**
+      - .github/workflows/ptar.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # bash, for pipefail.
+    shell: bash
+
+env:
+  UPSTREAM_REPO: PlakarKorp/plakar
+  # Keep in step with ARG GO_IMAGE in packaging/ptar/Dockerfile.  The floor is
+  # the webdav connector's go.mod (go 1.26.2); GOTOOLCHAIN=local makes a plugin
+  # that outgrows it fail loudly instead of downloading a toolchain behind our
+  # back.
+  GO_VERSION: '1.26.5'
+  GOTOOLCHAIN: local
+
+jobs:
+  resolve:
+    name: resolve the upstream tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # to list the artifacts that already exist
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      slug: ${{ steps.pick.outputs.slug }}
+      build: ${{ steps.pick.outputs.build }}
+    steps:
+      - name: Pick the tag
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.plakar_ref }}
+        run: |
+          upstream=https://github.com/$UPSTREAM_REPO.git
+
+          ref=${INPUT_REF:-}
+          if [ -z "$ref" ]; then
+            # The newest stable release: vX.Y.Z, no pre-release suffix.
+            ref=$(git ls-remote --tags --refs "$upstream" 'refs/tags/v*' |
+              sed 's|.*refs/tags/||' |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+              sort -V | tail -n 1) || true
+          fi
+          if [ -z "$ref" ]; then
+            echo "::error::no stable v* tag found on $UPSTREAM_REPO"
+            exit 1
+          fi
+
+          # An explicit ref has to exist upstream, as a tag or as a branch.
+          if ! git ls-remote --exit-code "$upstream" \
+            "refs/tags/$ref" "refs/heads/$ref" >/dev/null; then
+            echo "::error::$ref is neither a tag nor a branch of $UPSTREAM_REPO"
+            exit 1
+          fi
+
+          # Artifact names cannot hold a slash.
+          slug=${ref//\//-}
+
+          build=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            live=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ptar-$slug&per_page=100" \
+              --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [ "$live" -gt 0 ]; then
+              build=false
+              echo "ptar-$slug already exists, nothing to build." |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+          {
+            echo "ref=$ref"
+            echo "slug=$slug"
+            echo "build=$build"
+          } >>"$GITHUB_OUTPUT"
+          echo "plakar $ref, build=$build"
+
+  ptar:
+    name: ptar-${{ needs.resolve.outputs.slug }}
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAKAR_REF: ${{ needs.resolve.outputs.ref }}
+    steps:
+      # The packaging comes from this repository...
+      - name: Check out the packaging
+        uses: actions/checkout@v4
+        with:
+          path: fork
+          sparse-checkout: packaging/ptar
+
+      # ...and plakar from upstream, at the tag the packages are meant for.
+      - name: Check out plakar at ${{ needs.resolve.outputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ needs.resolve.outputs.ref }}
+          path: plakar
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: plakar/go.sum
+
+      - name: Build plakar
+        working-directory: plakar
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$HOME/.local/bin/plakar" .
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      # The version is a constant in the sources, set by the commit a release is
+      # tagged on, so a build of tag vX.Y.Z reports plakar/vX.Y.Z.  Say so if it
+      # does not: the packages would then not be what their name claims.
+      - name: Check that plakar is the release it should be
+        run: |
+          state=$RUNNER_TEMP/plakar-version
+          got=$(plakar -configdir "$state" -cachedir "$state" -datadir "$state" version | tail -n 1)
+          echo "plakar built from $PLAKAR_REF reports: $got"
+          case $PLAKAR_REF in
+          v[0-9]*.[0-9]*.[0-9]*)
+            if [ "$got" != "plakar/$PLAKAR_REF" ]; then
+              echo "::warning::plakar reports $got, not plakar/$PLAKAR_REF"
+            fi
+            ;;
+          esac
+
+      - name: Package the connectors
+        env:
+          RECIPE_DIR: ${{ github.workspace }}/fork/packaging/ptar/recipes
+          OUT_DIR: ${{ github.workspace }}/dist/plugins
+          PTAR_STATE_DIR: ${{ runner.temp }}/plakar-state
+          # Empty on every event but workflow_dispatch.
+          PTAR_PLATFORMS: ${{ inputs.platforms || 'linux/amd64 darwin/arm64 windows/amd64' }}
+          RECIPES: ${{ inputs.recipes }}
+        run: |
+          # Deliberate word splitting: RECIPES is a space separated list.
+          # shellcheck disable=SC2086
+          fork/packaging/ptar/build-ptar.sh $RECIPES
+
+      # actions/upload-artifact from v4 on rejects overwriting by default; a
+      # re-run for the same tag is meant to replace its artifact.
+      - name: Upload the packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptar-${{ needs.resolve.outputs.slug }}
+          path: |
+            dist/plugins/*.ptar
+            dist/plugins/*.ptar.sha256
+          if-no-files-found: error
+          # A .ptar is already compressed; zipping it again only costs time.
+          compression-level: 0
+          retention-days: 90
+          overwrite: true
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Connector packages, built with plakar $PLAKAR_REF"
+            echo
+            echo '| package | size | sha256 |'
+            echo '| --- | --- | --- |'
+            for f in dist/plugins/*.ptar; do
+              printf "| \`%s\` | %s | \`%s\` |\n" "${f##*/}" \
+                "$(du -h "$f" | cut -f1)" "$(cut -d' ' -f1 "$f.sha256")"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -163,5 +163,39 @@ only the *first* of `.forgejo/workflows`, `.gitea/workflows` and
 `.github/workflows` that it finds, so adding this directory hides
 `.github/workflows` from a Forgejo mirror entirely.
 
+### GitHub
+
+`.github/workflows/ptar.yml` does the same on GitHub, for a fork of
+`PlakarKorp/plakar` that carries this directory, with one difference: it follows
+the upstream release tags.  plakar is not taken from the fork but built from a
+`PlakarKorp/plakar` tag, so the packages are assembled by the release they are
+meant for, whereas the recipes and `build-ptar.sh` come from the fork.  The
+result is one artifact per tag, `ptar-<tag>`, with the six packages (s3 and
+webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`.
+
+| Trigger | Builds |
+| --- | --- |
+| `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set |
+| `schedule`, daily | the newest stable upstream tag, unless its artifact already exists |
+| `push` to `ptar-packaging`, touching this directory | the newest stable upstream tag |
+
+```console
+$ gh workflow run ptar.yml -f plakar_ref=v1.1.6
+$ gh run download --name ptar-v1.1.6
+```
+
+Worth knowing:
+
+- `workflow_dispatch` and `schedule` only exist on the default branch, so the
+  branch that carries the workflow has to be the default branch of the fork.
+  GitHub also pauses scheduled workflows after 60 days without repository
+  activity.
+- Do not push upstream's `v*` tags to the fork: its `release.yml` would run
+  GoReleaser on each of them.  The workflow reads the tag from
+  `PlakarKorp/plakar` directly.
+- The install smoke test uses `-allow-unsigned`, which plakar has had since
+  v1.1.5, so older tags cannot be packaged this way.
+- Artifacts are kept for 90 days.
+
 [recipe]: ../../subcommands/pkg/plakar-pkg-recipe.yaml.5
 [direnv]: https://direnv.net
