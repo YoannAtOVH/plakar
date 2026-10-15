@@ -1,0 +1,129 @@
+# Publishes the connector .ptar packages as assets of a Forgejo release.
+#
+# Cut a packaging tag to trigger it:
+#
+#     git tag ptar/2026.07.28
+#     git push origin ptar/2026.07.28
+#
+# The tag says *when* the packages were cut, not what is in them: each package
+# carries the version its recipe pins (packaging/ptar/recipes/*.yaml), which is
+# why a date reads better here than a semver.  Bump a recipe, tag, done.
+#
+# For a dry run without publishing anything, use the `ptar` workflow instead:
+# it is manually dispatchable and keeps the packages as job artifacts.
+
+name: ptar-release
+
+on:
+  push:
+    tags:
+      - 'ptar/*'
+
+env:
+  # Keep in step with ARG GO_IMAGE in packaging/ptar/Dockerfile and with the
+  # `ptar` workflow.
+  GO_VERSION: '1.26.5'
+  GOTOOLCHAIN: local
+
+jobs:
+  release:
+    runs-on: docker
+    container:
+      # Debian based on purpose: forgejo-release is a composite action that
+      # shells out to curl and jq, and apt-get installs them when missing.
+      image: data.forgejo.org/oci/node:24-trixie
+    timeout-minutes: 60
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+
+      - uses: https://data.forgejo.org/actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Install build prerequisites
+        run: |
+          # `plakar pkg build` shells out to git and to each plugin's Makefile;
+          # curl and jq are what forgejo-release needs further down.
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git make curl jq
+
+      - name: Build plakar
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$HOME/.local/bin/plakar" .
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Package the connectors
+        env:
+          RECIPE_DIR: packaging/ptar/recipes
+          OUT_DIR: ${{ github.workspace }}/dist/plugins
+          PTAR_STATE_DIR: ${{ github.workspace }}/.plakar-state
+          # The same set .goreleaser.yml ships plakar itself for.  The plugins
+          # are pure Go, so one amd64 runner cross compiles all ten; every one
+          # of them is known to build for both connectors.  Override per
+          # repository with the PTAR_RELEASE_PLATFORMS variable.
+          PLATFORMS_DEFAULT: >-
+            linux/amd64 linux/arm64
+            darwin/amd64 darwin/arm64
+            windows/amd64 windows/arm64
+            freebsd/amd64 freebsd/arm64
+            openbsd/amd64 openbsd/arm64
+          PLATFORMS_OVERRIDE: ${{ vars.PTAR_RELEASE_PLATFORMS }}
+        run: |
+          PTAR_PLATFORMS=${PLATFORMS_OVERRIDE:-$PLATFORMS_DEFAULT}
+          export PTAR_PLATFORMS
+          packaging/ptar/build-ptar.sh
+
+      - name: Write the release notes
+        id: notes
+        run: |
+          # A package is named <name>_<version>_<os>_<arch>.ptar; peel the two
+          # trailing fields off to get at the version.
+          prerelease=false
+          for f in dist/plugins/*.ptar; do
+            base=${f##*/}
+            base=${base%.ptar}
+            base=${base%_*}
+            base=${base%_*}
+            case ${base##*_} in
+            *-*) prerelease=true ;;
+            esac
+          done
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
+
+          # dist/notes.md deliberately sits outside dist/plugins: every file in
+          # the release directory is uploaded as an asset.
+          {
+            echo 'plakar connector packages, built from the recipes in `packaging/ptar/recipes`.'
+            echo
+            echo 'Install one with `plakar pkg add <file>`.'
+            echo
+            echo '### sha256'
+            echo
+            echo '```'
+            cat dist/plugins/*.ptar.sha256
+            echo '```'
+          } >dist/notes.md
+          cat dist/notes.md
+
+      - name: Publish the release
+        uses: https://data.forgejo.org/actions/forgejo-release@v2.13.4
+        with:
+          direction: upload
+          url: ${{ github.server_url }}
+          repo: ${{ github.repository }}
+          tag: ${{ github.ref_name }}
+          sha: ${{ github.sha }}
+          # The per-run token already has repository write.  Swap in a personal
+          # token with `write:repository` if the instance restricts it, or if you
+          # need this release to trigger further workflows -- Forgejo does not
+          # fire events for changes made with the automatic token.
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          release-dir: dist/plugins
+          release-notes-file: dist/notes.md
+          prerelease: ${{ steps.notes.outputs.prerelease }}
+          # Makes a re-run replace the assets instead of failing on them.
+          override: true
+          verbose: true

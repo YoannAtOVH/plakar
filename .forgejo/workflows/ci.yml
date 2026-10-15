@@ -1,0 +1,102 @@
+# Build, vet and test plakar itself -- the Forgejo counterpart of
+# .github/workflows/go.yml.
+#
+# This file is not redundant with the GitHub one: Forgejo probes
+# .forgejo/workflows, .gitea/workflows and .github/workflows in that order and
+# uses only the FIRST directory that exists.  So the moment .forgejo/workflows
+# is present, a Forgejo instance stops looking at .github/workflows entirely --
+# without this file, a Forgejo mirror would have packaging CI and no test CI.
+#
+# Expressions use the `github.*` context and `$GITHUB_*` variables, which
+# Forgejo keeps as permanent aliases of its native `forge.*` / `$FORGEJO_*`;
+# they work on every runner version, the native spellings need a recent one.
+
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      # Pinned rather than inherited from the `docker` label, whose image is
+      # whatever the instance administrator picked.  It must carry node, since
+      # checkout, setup-go and upload-artifact are all node actions.
+      image: data.forgejo.org/oci/node:24-trixie
+    timeout-minutes: 20
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - uses: https://data.forgejo.org/actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # Produces a coverage profile and a JUnit report in one run.  The
+      # `timeout -s QUIT 5m` wrapper is kept from the GitHub workflow so a hung
+      # test still dumps goroutine stacks; continue-on-error keeps the upload
+      # steps reachable, which is when the reports matter most, and the last
+      # step re-surfaces the failure.
+      - name: Test
+        id: gotest
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          set +e
+          # -p 4 caps how many package test binaries run at once.  Several
+          # packages (api, diag, maintenance) each spin up pebble caches and do
+          # real encryption and snapshot work; at the default parallelism they
+          # over-subscribe the runner's cores, starve each other and blow the
+          # per-test timeout -- which kills the whole package and reports every
+          # test in it as failed.  Capping concurrency keeps the run both fast
+          # and reliable.
+          go install github.com/jstemmer/go-junit-report/v2@latest && \
+            (timeout -s QUIT 5m go test -v -p 4 -coverprofile=coverage.out \
+              -covermode=atomic -timeout 2m -json ./... \
+             | "$(go env GOPATH)/bin/go-junit-report" -parser gojson -set-exit-code >junit.xml)
+          status=$?
+          echo "test_exit=$status" >>"$GITHUB_OUTPUT"
+          exit $status
+
+      # forgejo/upload-artifact, not actions/upload-artifact: the mirrored
+      # upstream action from v4 on aborts once it notices it is not talking to
+      # github.com.  The forgejo/ fork is that action with the check removed.
+      - name: Upload the test reports
+        if: '!cancelled()'
+        uses: https://data.forgejo.org/forgejo/upload-artifact@v5
+        with:
+          name: test-reports-${{ github.sha }}
+          path: |
+            coverage.out
+            junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+      # Codecov is not a Forgejo action, hence the github.com URL; it talks to
+      # codecov.io only, so it works from here.  Skipped unless the repository
+      # has a CODECOV_TOKEN secret -- which also skips it on fork pull requests,
+      # where secrets are empty by design.
+      - name: Upload coverage to Codecov
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        uses: https://github.com/codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+      - name: Fail if tests failed
+        if: ${{ steps.gotest.outputs.test_exit != '0' }}
+        run: exit 1

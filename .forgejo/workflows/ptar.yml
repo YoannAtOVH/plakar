@@ -1,0 +1,162 @@
+# Packaging check for the connector .ptar packages.
+#
+# It runs the very same script as the local docker build documented in
+# packaging/ptar/README.md -- packaging/ptar/build-ptar.sh -- so a green run
+# here means `make ptar` works too.  The runner already hands us an isolated
+# container, so this builds natively instead of nesting docker; the optional
+# `docker-image` job below covers the Dockerfile itself where the runner is
+# allowed to talk to a docker daemon.
+#
+# Two conventions worth knowing about, both deliberate:
+#   * action refs are fully qualified.  A bare `actions/checkout` is resolved
+#     against the instance's DEFAULT_ACTIONS_URL, which the administrator may
+#     have changed.
+#   * the job image is pinned rather than inherited from the `docker` label,
+#     whose image is whatever the administrator chose.  It has to carry node,
+#     since checkout/setup-go/upload-artifact are all node actions.
+
+name: ptar
+
+on:
+  pull_request:
+    paths:
+      - packaging/ptar/**
+      - subcommands/pkg/**
+      - .forgejo/workflows/ptar.yml
+      - go.mod
+      - go.sum
+  push:
+    branches:
+      - main
+    paths:
+      - packaging/ptar/**
+      - subcommands/pkg/**
+      - .forgejo/workflows/ptar.yml
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+    inputs:
+      recipes:
+        description: 'Recipes to build, space separated. Empty builds all of them.'
+        required: false
+        default: ''
+      platforms:
+        description: 'Targets, space separated os/arch. Empty means linux/amd64.'
+        required: false
+        default: 'linux/amd64'
+
+env:
+  # Keep in step with ARG GO_IMAGE in packaging/ptar/Dockerfile.  The floor is
+  # the webdav connector's go.mod (go 1.26.2); GOTOOLCHAIN=local makes a plugin
+  # that outgrows it fail loudly instead of downloading a toolchain behind our
+  # back.
+  GO_VERSION: '1.26.5'
+  GOTOOLCHAIN: local
+
+jobs:
+  ptar:
+    runs-on: docker
+    container:
+      image: data.forgejo.org/oci/node:24-trixie
+    timeout-minutes: 30
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+
+      - uses: https://data.forgejo.org/actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Install build prerequisites
+        run: |
+          # `plakar pkg build` shells out to git (clone, sparse-checkout) and
+          # to each plugin's Makefile.
+          if command -v git >/dev/null && command -v make >/dev/null; then
+            exit 0
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git make
+
+      - name: Build plakar
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$HOME/.local/bin/plakar" .
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Package the connectors
+        env:
+          RECIPE_DIR: packaging/ptar/recipes
+          OUT_DIR: ${{ github.workspace }}/dist/plugins
+          PTAR_STATE_DIR: ${{ github.workspace }}/.plakar-state
+          # Empty on every event but workflow_dispatch; build-ptar.sh falls back
+          # to linux/amd64 then.
+          PTAR_PLATFORMS: ${{ inputs.platforms }}
+          RECIPES: ${{ inputs.recipes }}
+        run: |
+          # Deliberate word splitting: RECIPES is a space separated list.
+          # shellcheck disable=SC2086
+          packaging/ptar/build-ptar.sh $RECIPES
+
+      # forgejo/upload-artifact, not actions/upload-artifact: the mirrored
+      # upstream action from v4 on aborts once it notices it is not talking to
+      # github.com.  The forgejo/ fork is that action with the check removed.
+      - name: Upload the packages
+        uses: https://data.forgejo.org/forgejo/upload-artifact@v5
+        with:
+          name: ptar-${{ github.sha }}
+          path: |
+            dist/plugins/*.ptar
+            dist/plugins/*.ptar.sha256
+          if-no-files-found: error
+          # A .ptar is already compressed; zipping it again only costs time.
+          compression-level: 0
+          retention-days: 14
+          overwrite: true
+
+  docker-image:
+    # Exercises the container path from packaging/ptar/README.md so the
+    # Dockerfile cannot rot.  A workflow cannot grant itself a docker daemon --
+    # that is a runner-side setting (`container.docker_host`) -- so this stays
+    # opt-in: set the repository variable PTAR_BUILD_DOCKER to `true` once the
+    # runner can reach one.
+    if: vars.PTAR_BUILD_DOCKER == 'true'
+    runs-on: docker
+    container:
+      image: data.forgejo.org/oci/node:24-trixie
+    timeout-minutes: 30
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+
+      - name: Install the docker CLI
+        run: |
+          if command -v docker >/dev/null; then
+            exit 0
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends docker.io
+          docker version
+
+      - name: Build the builder image
+        run: |
+          docker build \
+            --build-arg "PLAKAR_REVISION=$GITHUB_SHA" \
+            -f packaging/ptar/Dockerfile \
+            -t "plakar-ptar-builder:$GITHUB_SHA" \
+            .
+
+      - name: Package the connectors in the container
+        run: |
+          # No bind mount: we talk to a daemon that does not share this
+          # container's filesystem, so paths would not line up.  Copy the
+          # artifacts out instead.
+          docker run --name ptar-ci --init "plakar-ptar-builder:$GITHUB_SHA"
+          mkdir -p dist/plugins
+          docker cp ptar-ci:/out/. dist/plugins/
+          docker rm ptar-ci
+          ls -l dist/plugins
+
+      - name: Clean up the image
+        if: '!cancelled()'
+        run: docker image rm "plakar-ptar-builder:$GITHUB_SHA" || true
