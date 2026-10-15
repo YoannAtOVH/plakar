@@ -176,7 +176,7 @@ and webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`;
 
 | Trigger | Builds |
 | --- | --- |
-| `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set |
+| `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set, `runner` picks the runner image |
 | `schedule`, daily | the newest stable upstream tag, unless its artifact already exists |
 | `push` to `ptar-packaging`, touching this directory (README excepted) | the newest stable upstream tag |
 
@@ -196,6 +196,11 @@ Worth knowing:
   `PlakarKorp/plakar` directly.
 - The install smoke test uses `-allow-unsigned`, which plakar has had since
   v1.1.5, so older tags cannot be packaged this way.
+- GitHub moves `ubuntu-latest` to Ubuntu 26.04 between October 19 and
+  November 19, 2026.  The workflow was checked on `ubuntu-24.04` and on
+  `ubuntu-26.04`, which ships the uutils coreutils instead of GNU's (the `sort
+  -V` that picks the newest tag included).  `-f runner=<label>` tries any other
+  image on demand.
 - Artifacts are kept for 90 days.
 
 [recipe]: ../../subcommands/pkg/plakar-pkg-recipe.yaml.5
