@@ -1,0 +1,24 @@
+# Context filter for packaging/ptar/Dockerfile (BuildKit picks up the
+# <dockerfile>.dockerignore sitting next to the Dockerfile, in place of the
+# repository root .dockerignore).
+#
+# The builder only needs what `go build .` reads, so .git -- 130+ MB that would
+# otherwise be uploaded on every build -- goes first.  plakar is built with
+# -buildvcs=false, so nothing misses it.
+.git
+.github
+.forgejo
+.vscode
+.goreleaser.yml
+.codecov.yml
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+README.md
+SECURITY.md
+docs/
+unittests/
+testing/
+dist/
+plakar
+**/.DS_Store

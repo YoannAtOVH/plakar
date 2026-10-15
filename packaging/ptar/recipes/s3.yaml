@@ -1,0 +1,9 @@
+# plakar-pkg-recipe.yaml(5) -- S3 connector: storage, importer and exporter.
+#
+# `version` doubles as the git tag to check out.  The S3 connector lives in a
+# repository of its own, so the tag is a plain semver.
+#
+# Override without touching this file:  PTAR_S3_VERSION=v1.1.1 make ptar-s3
+name: s3
+version: v1.1.2
+repository: https://github.com/PlakarKorp/integration-s3

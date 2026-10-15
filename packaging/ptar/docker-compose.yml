@@ -1,0 +1,44 @@
+# Compose front end for the .ptar builder -- the same image and the same
+# entrypoint as packaging/ptar/bin/plakar-ptar, for people who would rather
+# drive it declaratively:
+#
+#     cd packaging/ptar
+#     docker compose run --rm ptar            # every recipe
+#     docker compose run --rm ptar s3         # just S3
+#
+# The defaults below come from the repository .envrc, so `direnv allow` once and
+# every knob is already set.  Note that compose reads a plain `.env` file next to
+# this one, whereas direnv reads the one at the repository root.
+
+name: plakar-ptar
+
+services:
+  ptar:
+    build:
+      context: ../..
+      dockerfile: packaging/ptar/Dockerfile
+      args:
+        GO_IMAGE: ${PTAR_GO_IMAGE:-golang:1.26.5-alpine3.23}
+    image: ${PTAR_IMAGE:-plakar-ptar-builder:local}
+    init: true
+    environment:
+      # Space separated os/arch list; the Go toolchain cross compiles, so one
+      # amd64 container covers every target.
+      PTAR_PLATFORMS: ${PTAR_PLATFORMS:-linux/amd64}
+      # uid:gid the artifacts are handed back to, so the bind mount below does
+      # not fill up with root owned files.
+      PTAR_OWNER: ${PTAR_OWNER:-}
+      # Build another tag than the one the recipe pins.
+      PTAR_S3_VERSION: ${PTAR_S3_VERSION:-}
+      PTAR_WEBDAV_VERSION: ${PTAR_WEBDAV_VERSION:-}
+      # Only needed for private plugin repositories.
+      PLAKAR_CLONE_TOKEN: ${PLAKAR_CLONE_TOKEN:-}
+    volumes:
+      - ${PTAR_DIST:-../../dist/plugins}:/out
+      - gocache:/gocache
+
+volumes:
+  # Go module and build cache, kept between runs.  Named explicitly so compose
+  # and packaging/ptar/bin/plakar-ptar share one cache instead of two.
+  gocache:
+    name: ${PTAR_CACHE_VOLUME:-plakar-ptar-gocache}

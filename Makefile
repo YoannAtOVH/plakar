@@ -43,4 +43,27 @@ coverage:
 	@grep -v '/plakar/testing/' ${COVERPROFILE} > ${COVERPROFILE}.tmp && mv ${COVERPROFILE}.tmp ${COVERPROFILE}
 	@${GO} tool cover -func=${COVERPROFILE} | tail -1
 
-.PHONY: all plakar install check test coverage junit
+# Plugin packages (.ptar).  Everything runs inside a container built from
+# packaging/ptar/Dockerfile, so docker is the only requirement -- no Go
+# toolchain, no plakar on $PATH.  See packaging/ptar/README.md.
+#
+# Override the targets like so:
+#	make ptar PTAR_PLATFORMS='linux/amd64 darwin/arm64'
+PTAR =		packaging/ptar/bin/plakar-ptar
+PTAR_RECIPES =	s3 webdav
+PTAR_DIST =	dist/plugins
+
+ptar:
+	PTAR_PLATFORMS='${PTAR_PLATFORMS}' ${PTAR} ${PTAR_RECIPES}
+
+ptar-s3:
+	PTAR_PLATFORMS='${PTAR_PLATFORMS}' ${PTAR} s3
+
+ptar-webdav:
+	PTAR_PLATFORMS='${PTAR_PLATFORMS}' ${PTAR} webdav
+
+ptar-clean:
+	rm -rf ${PTAR_DIST}
+
+.PHONY: all plakar install check test coverage junit \
+	ptar ptar-s3 ptar-webdav ptar-clean

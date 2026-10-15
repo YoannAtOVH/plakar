@@ -5,3 +5,8 @@
 /coverage.out
 /junit.xml
 .idea
+# direnv: local overrides for the .ptar build, see .env.example
+/.env
+/.direnv
+# throwaway plakar config/cache/data the .ptar build runs against in CI
+/.plakar-state

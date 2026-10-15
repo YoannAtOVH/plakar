@@ -1,0 +1,12 @@
+# plakar-pkg-recipe.yaml(5) -- WebDAV connector: importer and exporter.
+#
+# WebDAV ships from the `integrations` mono-repo, so `version` carries a
+# `webdav/` prefix.  That prefix is both the git tag namespace and the
+# subdirectory to build: Recipe.Subdir() splits it off to drive the sparse
+# checkout, Recipe.Semver() keeps the trailing semver for the package name.
+#
+# Override without touching this file:
+#   PTAR_WEBDAV_VERSION=webdav/v1.1.0-alpha.2 make ptar-webdav
+name: webdav
+version: webdav/v1.1.0-alpha.3
+repository: https://github.com/PlakarKorp/integrations

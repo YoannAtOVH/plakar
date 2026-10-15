@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# plakar-ptar -- build plakar plugin packages (.ptar) in a container.
+#
+# Nothing but docker is needed on the host: plakar, git, make and the Go
+# toolchain all live in the builder image.  direnv puts this script on $PATH
+# (see the repository .envrc) and exports the defaults below.
+#
+#     plakar-ptar                       # every recipe, for $PTAR_PLATFORMS
+#     plakar-ptar s3                    # just the S3 connector
+#     plakar-ptar --platforms 'linux/amd64 darwin/arm64' s3 webdav
+#
+# Everything lands in $PTAR_DIST (default dist/plugins) with a .sha256 next to
+# each package.
+
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+
+: "${PTAR_IMAGE:=plakar-ptar-builder:local}"
+: "${PTAR_GO_IMAGE:=golang:1.26.5-alpine3.23}"
+: "${PTAR_DIST:=$repo_root/dist/plugins}"
+: "${PTAR_PLATFORMS:=linux/amd64}"
+: "${PTAR_CACHE_VOLUME:=plakar-ptar-gocache}"
+
+usage() {
+	cat <<'EOF'
+Usage: plakar-ptar [options] [recipe ...]
+
+Recipes are the base names under packaging/ptar/recipes (s3, webdav); with none
+given, all of them are built.
+
+Options:
+  --platforms LIST   space separated os/arch list  (default $PTAR_PLATFORMS)
+  --dist DIR         output directory              (default $PTAR_DIST)
+  --image REF        builder image tag             (default $PTAR_IMAGE)
+  --no-build         reuse the existing image instead of rebuilding it
+  --pull             refresh the Go base image while building
+  -h, --help         this message
+
+Environment:
+  PTAR_<NAME>_VERSION   build another tag, e.g. PTAR_S3_VERSION=v1.1.1
+  PLAKAR_CLONE_TOKEN    forwarded to plakar for private plugin repositories
+EOF
+}
+
+build_image=1
+pull_arg=()
+recipes=()
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	--platforms) PTAR_PLATFORMS=${2:?--platforms needs a value}; shift 2 ;;
+	--dist) PTAR_DIST=${2:?--dist needs a value}; shift 2 ;;
+	--image) PTAR_IMAGE=${2:?--image needs a value}; shift 2 ;;
+	--no-build) build_image=0; shift ;;
+	--pull) pull_arg=(--pull); shift ;;
+	-h | --help) usage; exit 0 ;;
+	--) shift; recipes+=("$@"); break ;;
+	-*) printf 'plakar-ptar: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+	*) recipes+=("$1"); shift ;;
+	esac
+done
+
+command -v docker >/dev/null || {
+	echo "plakar-ptar: docker is required" >&2
+	exit 1
+}
+
+mkdir -p "$PTAR_DIST"
+PTAR_DIST=$(cd -- "$PTAR_DIST" && pwd)
+
+export DOCKER_BUILDKIT=1
+
+if [ "$build_image" -eq 1 ]; then
+	# The revision is only a label: plakar is built with -buildvcs=false so
+	# that .git can stay out of the build context.
+	revision=$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)
+	docker build ${pull_arg[@]+"${pull_arg[@]}"} \
+		--build-arg "GO_IMAGE=$PTAR_GO_IMAGE" \
+		--build-arg "PLAKAR_REVISION=$revision" \
+		-f "$repo_root/packaging/ptar/Dockerfile" \
+		-t "$PTAR_IMAGE" \
+		"$repo_root"
+fi
+
+: "${PTAR_OWNER:=$(id -u):$(id -g)}"
+run_env=(-e "PTAR_PLATFORMS=$PTAR_PLATFORMS" -e "PTAR_OWNER=$PTAR_OWNER")
+
+# Forward the per-recipe version pins and the clone token if they are set,
+# by name so the values never show up in the process list.
+while IFS='=' read -r name _; do
+	case $name in
+	PTAR_*_VERSION | PLAKAR_CLONE_TOKEN) run_env+=(-e "$name") ;;
+	esac
+done < <(env)
+
+exec docker run --rm --init \
+	"${run_env[@]}" \
+	-v "$PTAR_DIST:/out" \
+	-v "$PTAR_CACHE_VOLUME:/gocache" \
+	"$PTAR_IMAGE" ${recipes[@]+"${recipes[@]}"}
