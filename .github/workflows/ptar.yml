@@ -11,6 +11,7 @@
 #     gh workflow run ptar.yml                         # newest stable upstream tag
 #     gh workflow run ptar.yml -f plakar_ref=v1.1.6    # another tag
 #     gh run download --name ptar-v1.1.7               # fetch the packages
+#     gh workflow run ptar.yml -f runner=ubuntu-26.04  # try another runner image
 #
 # Two things about the fork, both deliberate:
 #   * workflow_dispatch and schedule only work from the default branch, so the
@@ -39,6 +40,10 @@ on:
         description: 'Targets, space separated os/arch.'
         required: false
         default: 'linux/amd64 darwin/arm64 windows/amd64'
+      runner:
+        description: 'Runner label to run on, e.g. ubuntu-26.04 to try the next ubuntu-latest ahead of its migration.'
+        required: false
+        default: 'ubuntu-latest'
   schedule:
     # Daily, off the hour.  Builds the newest stable upstream tag unless the
     # artifact of that tag is already there.
@@ -71,7 +76,7 @@ env:
 jobs:
   resolve:
     name: resolve the upstream tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       actions: read # to list the artifacts that already exist
@@ -134,7 +139,7 @@ jobs:
     name: ptar-${{ needs.resolve.outputs.slug }}
     needs: resolve
     if: needs.resolve.outputs.build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       PLAKAR_REF: ${{ needs.resolve.outputs.ref }}
@@ -159,6 +164,21 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: plakar/go.sum
+
+      # What the build leans on, so that a change of runner image shows in the
+      # log rather than in a puzzling failure.
+      - name: Show the runner
+        run: |
+          {
+            grep '^PRETTY_NAME=' /etc/os-release
+            echo "image $ImageOS $ImageVersion; /bin/sh is $(readlink -f /bin/sh)"
+            git --version
+            make --version
+            sort --version
+            sha256sum --version
+            gh --version
+            go version
+          } 2>&1 | grep -E '^(PRETTY_NAME|image|git version|GNU Make|sort |sha256sum |gh version|go version)'
 
       - name: Build plakar
         working-directory: plakar
