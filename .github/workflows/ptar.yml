@@ -140,21 +140,21 @@ jobs:
     steps:
       # The packaging comes from this repository...
       - name: Check out the packaging
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: fork
           sparse-checkout: packaging/ptar
 
       # ...and plakar from upstream, at the tag the packages are meant for.
       - name: Check out plakar at ${{ needs.resolve.outputs.ref }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ needs.resolve.outputs.ref }}
           path: plakar
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: plakar/go.sum
@@ -198,7 +198,7 @@ jobs:
       # actions/upload-artifact from v4 on rejects overwriting by default; a
       # re-run for the same tag is meant to replace its artifact.
       - name: Upload the packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ptar-${{ needs.resolve.outputs.slug }}
           path: |
