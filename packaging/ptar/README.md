@@ -170,14 +170,15 @@ only the *first* of `.forgejo/workflows`, `.gitea/workflows` and
 the upstream release tags.  plakar is not taken from the fork but built from a
 `PlakarKorp/plakar` tag, so the packages are assembled by the release they are
 meant for, whereas the recipes and `build-ptar.sh` come from the fork.  The
-result is one artifact per tag, `ptar-<tag>`, with the six packages (s3 and
-webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`.
+result is an artifact named `ptar-<tag>`, one per run, with the six packages (s3
+and webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`;
+`gh run download --name ptar-<tag>` fetches the latest one.
 
 | Trigger | Builds |
 | --- | --- |
 | `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set |
 | `schedule`, daily | the newest stable upstream tag, unless its artifact already exists |
-| `push` to `ptar-packaging`, touching this directory | the newest stable upstream tag |
+| `push` to `ptar-packaging`, touching this directory (README excepted) | the newest stable upstream tag |
 
 ```console
 $ gh workflow run ptar.yml -f plakar_ref=v1.1.6

@@ -5,8 +5,8 @@
 # own plakar sources are not used: plakar is built from a tag of
 # PlakarKorp/plakar, checked out below, so the packages are assembled by the very
 # release they are meant for.  The recipes and build-ptar.sh come from the fork.
-# The result is one artifact per tag, ptar-<tag>, holding the packages and their
-# checksums.
+# Each run uploads one artifact, ptar-<tag>, holding the packages and their
+# checksums; `gh run download --name ptar-<tag>` fetches the latest one.
 #
 #     gh workflow run ptar.yml                         # newest stable upstream tag
 #     gh workflow run ptar.yml -f plakar_ref=v1.1.6    # another tag
@@ -48,6 +48,7 @@ on:
       - ptar-packaging
     paths:
       - packaging/ptar/**
+      - '!packaging/ptar/README.md'
       - .github/workflows/ptar.yml
 
 permissions:
@@ -195,8 +196,10 @@ jobs:
           # shellcheck disable=SC2086
           fork/packaging/ptar/build-ptar.sh $RECIPES
 
-      # actions/upload-artifact from v4 on rejects overwriting by default; a
-      # re-run for the same tag is meant to replace its artifact.
+      # Since v4, upload-artifact refuses a second artifact of the same name
+      # within one run; overwrite lets "Re-run jobs" replace it.  A new run
+      # starts clean and adds its own ptar-<tag> next to the older ones, which
+      # expire on their own.
       - name: Upload the packages
         uses: actions/upload-artifact@v7
         with:
