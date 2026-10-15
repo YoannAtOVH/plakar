@@ -151,18 +151,32 @@ build_one() {
 # verify_native NAME PTAR -- install the package into a throwaway plakar state
 # and check it shows up, then remove it.  Catches a ptar that is well formed but
 # carries a manifest plakar refuses.
+#
+# Since v1.1.5 plakar installs only signed packages, and nothing here signs
+# them, so the install passes -allow-unsigned.  That waives the check for this
+# throwaway state alone; a signature that is present is still verified.
 verify_native() {
 	vname=$1
 	vptar=$2
 	vstate=$(mktemp -d)
 
-	if plakar -configdir "$vstate/config" -cachedir "$vstate/cache" \
-		-datadir "$vstate/data" pkg add "$vptar" >/dev/null &&
+	vplakar() {
 		plakar -configdir "$vstate/config" -cachedir "$vstate/cache" \
-			-datadir "$vstate/data" pkg show | grep -q "^$vname@"; then
+		       -datadir "$vstate/data" "$@"
+	}
+
+	# As setup() does for the build state: no first-run banner to wade through
+	# if the install has to be diagnosed below.
+	vplakar -disable-security-check >/dev/null
+
+	# `pkg add` explains a refusal on its own ("package is not signed", a
+	# manifest it dislikes, ...), so keep what it says and show it on failure.
+	if vout=$(vplakar pkg add -allow-unsigned "$vptar" 2>&1) &&
+		vplakar pkg show | grep -q "^$vname@"; then
 		info "$vname: installs cleanly"
 	else
 		rm -rf "$vstate"
+		printf '%s\n' "$vout" >&2
 		die "$vname: $(basename "$vptar") does not install"
 	fi
 

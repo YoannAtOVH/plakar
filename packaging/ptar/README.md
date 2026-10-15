@@ -27,10 +27,13 @@ s3_v1.1.2_linux_amd64.ptar.sha256   webdav_v1.1.0-alpha.3_linux_amd64.ptar.sha25
 Then install one locally:
 
 ```console
-$ plakar pkg add dist/plugins/s3_v1.1.2_linux_amd64.ptar
+$ plakar pkg add -allow-unsigned dist/plugins/s3_v1.1.2_linux_amd64.ptar
 $ plakar pkg show
 s3@v1.1.2
 ```
+
+`-allow-unsigned` is needed because plakar refuses a package without a
+signature and these carry none, see [Signatures](#signatures).
 
 Without direnv, or from a script, the wrapper works standalone too:
 
@@ -97,10 +100,26 @@ Both connectors are known to build for the ten targets `.goreleaser.yml` ships
 plakar itself for — `{linux,darwin,windows,freebsd,openbsd}/{amd64,arm64}` —
 which is what the release workflow packages.
 
-Only the host platform's package gets the install smoke test (`pkg add`, `pkg
-show`, then discard); the others are checked for existence and checksummed.
+Only the host platform's package gets the install smoke test (`pkg add
+-allow-unsigned`, `pkg show`, then discard); the others are checked for
+existence and checksummed.
 Windows is handled by plakar itself, which passes `EXT=.exe` to the plugin's
 Makefile and rewrites the manifest's executable names.
+
+## Signatures
+
+`plakar pkg add` verifies a package against the keys plakar trusts and, since
+v1.1.5, refuses one that carries no signature.  The packages built here have
+none: the `.sha256` next to each only lets you check a download, it does not
+say who made the package.  Hence `-allow-unsigned`:
+
+- `build-ptar.sh` passes it for the install smoke test, which runs in a
+  throwaway state that is deleted right after;
+- so does anyone installing one of these packages by hand.  plakar prints a
+  warning each time.
+
+The flag only waives the *absence* of a signature.  A package that is signed is
+still verified, and a bad signature is still fatal.
 
 ## Notes on the container
 

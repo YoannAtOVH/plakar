@@ -98,7 +98,9 @@ jobs:
           {
             echo 'plakar connector packages, built from the recipes in `packaging/ptar/recipes`.'
             echo
-            echo 'Install one with `plakar pkg add <file>`.'
+            echo 'Install one with `plakar pkg add -allow-unsigned <file>`.  plakar refuses'
+            echo 'unsigned packages otherwise, and these carry no signature: the sums below'
+            echo 'only let you check your download.'
             echo
             echo '### sha256'
             echo
