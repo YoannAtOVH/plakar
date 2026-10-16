@@ -180,8 +180,8 @@ and webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`;
 
 | Trigger | Builds |
 | --- | --- |
-| `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set, `runner` picks the runner image |
-| `schedule`, daily | the newest stable upstream tag, unless its artifact already exists |
+| `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set, `runner` picks the runner image, `publish` releases the packages afterwards |
+| `schedule`, daily | the newest stable upstream tag, and releases it, unless its release already exists |
 | `push` to `ptar-packaging`, touching this directory (README excepted) | the newest stable upstream tag |
 
 ```console
@@ -194,7 +194,8 @@ Worth knowing:
 - `workflow_dispatch` and `schedule` only exist on the default branch, so the
   branch that carries the workflow has to be the default branch of the fork.
   GitHub also pauses scheduled workflows after 60 days without repository
-  activity.
+  activity, and disables them by default on a fork of a public repository:
+  `gh workflow enable ptar.yml` turns them on.
 - Do not push upstream's `v*` tags to the fork: its `release.yml` would run
   GoReleaser on each of them.  The workflow reads the tag from
   `PlakarKorp/plakar` directly.
@@ -205,7 +206,33 @@ Worth knowing:
   `ubuntu-26.04`, which ships the uutils coreutils instead of GNU's (the `sort
   -V` that picks the newest tag included).  `-f runner=<label>` tries any other
   image on demand.
-- Artifacts are kept for 90 days.
+- Artifacts are kept for 90 days; the assets of a release are not deleted.
+
+#### Public releases
+
+An artifact needs a GitHub account to download.  To hand the packages out without
+one, `release.sh` publishes them as the release `ptar-<tag>` of the fork:
+`ptar-v1.1.7` holds what plakar v1.1.7 assembled, and its tag sits on the commit
+that carries the packaging.  The scheduled run does it for each new upstream tag,
+a manual run does with `-f publish=true`.  Anyone can then fetch an asset, no
+account needed:
+
+```console
+$ base=https://github.com/<owner>/<repo>/releases/download/ptar-v1.1.7
+$ curl -fLO $base/s3_v1.1.2_linux_amd64.ptar
+$ curl -fLO $base/s3_v1.1.2_linux_amd64.ptar.sha256
+$ sha256sum -c s3_v1.1.2_linux_amd64.ptar.sha256
+$ plakar pkg add -allow-unsigned s3_v1.1.2_linux_amd64.ptar
+```
+
+- Only a plakar release tag (`vX.Y.Z`) is published, never a branch build.
+- The release is flagged a pre-release as long as one package carries a
+  pre-release version (webdav is still an alpha).
+- Publishing again for a tag that has its release replaces its assets and notes;
+  the scheduled run skips such a tag.
+- The packages are unsigned and the notes say so: whoever installs one trusts
+  this repository.  `gh release delete ptar-<tag> --cleanup-tag` takes a release
+  down.
 
 [recipe]: ../../subcommands/pkg/plakar-pkg-recipe.yaml.5
 [direnv]: https://direnv.net

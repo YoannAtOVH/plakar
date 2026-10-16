@@ -6,12 +6,16 @@
 # PlakarKorp/plakar, checked out below, so the packages are assembled by the very
 # release they are meant for.  The recipes and build-ptar.sh come from the fork.
 # Each run uploads one artifact, ptar-<tag>, holding the packages and their
-# checksums; `gh run download --name ptar-<tag>` fetches the latest one.
+# checksums; `gh run download --name ptar-<tag>` fetches the latest one.  An
+# artifact needs an account to download, so a run can also publish the packages
+# as the release ptar-<tag> (see release.sh), whose assets anyone can fetch: the
+# scheduled run does, a manual one does with -f publish=true.
 #
 #     gh workflow run ptar.yml                         # newest stable upstream tag
 #     gh workflow run ptar.yml -f plakar_ref=v1.1.6    # another tag
 #     gh run download --name ptar-v1.1.7               # fetch the packages
 #     gh workflow run ptar.yml -f runner=ubuntu-26.04  # try another runner image
+#     gh workflow run ptar.yml -f publish=true         # build, then release ptar-<tag>
 #
 # Two things about the fork, both deliberate:
 #   * workflow_dispatch and schedule only work from the default branch, so the
@@ -44,9 +48,14 @@ on:
         description: 'Runner label to run on, e.g. ubuntu-26.04 to try the next ubuntu-latest ahead of its migration.'
         required: false
         default: 'ubuntu-latest'
+      publish:
+        description: 'Publish the packages as the GitHub release ptar-<tag> once built (the scheduled run always does).'
+        type: boolean
+        required: false
+        default: false
   schedule:
-    # Daily, off the hour.  Builds the newest stable upstream tag unless the
-    # artifact of that tag is already there.
+    # Daily, off the hour.  Builds and publishes the newest stable upstream tag
+    # unless its release already exists.
     - cron: '23 5 * * *'
   push:
     branches:
@@ -79,7 +88,7 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
-      actions: read # to list the artifacts that already exist
+      contents: read # to look for an existing release
     outputs:
       ref: ${{ steps.pick.outputs.ref }}
       slug: ${{ steps.pick.outputs.slug }}
@@ -116,16 +125,14 @@ jobs:
           # Artifact names cannot hold a slash.
           slug=${ref//\//-}
 
+          # The scheduled run only has something to do for a tag that has no
+          # release yet.  A release does not expire, unlike an artifact.
           build=true
-          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            live=$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ptar-$slug&per_page=100" \
-              --jq '[.artifacts[] | select(.expired | not)] | length')
-            if [ "$live" -gt 0 ]; then
-              build=false
-              echo "ptar-$slug already exists, nothing to build." |
-                tee -a "$GITHUB_STEP_SUMMARY"
-            fi
+          if [ "$GITHUB_EVENT_NAME" = schedule ] &&
+            gh release view "ptar-$slug" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            build=false
+            echo "The release ptar-$slug already exists, nothing to build." |
+              tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
           {
@@ -141,6 +148,8 @@ jobs:
     if: needs.resolve.outputs.build == 'true'
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 30
+    outputs:
+      plakar_version: ${{ steps.version.outputs.version }}
     env:
       PLAKAR_REF: ${{ needs.resolve.outputs.ref }}
     steps:
@@ -191,10 +200,12 @@ jobs:
       # tagged on, so a build of tag vX.Y.Z reports plakar/vX.Y.Z.  Say so if it
       # does not: the packages would then not be what their name claims.
       - name: Check that plakar is the release it should be
+        id: version
         run: |
           state=$RUNNER_TEMP/plakar-version
           got=$(plakar -configdir "$state" -cachedir "$state" -datadir "$state" version | tail -n 1)
           echo "plakar built from $PLAKAR_REF reports: $got"
+          echo "version=$got" >>"$GITHUB_OUTPUT"
           case $PLAKAR_REF in
           v[0-9]*.[0-9]*.[0-9]*)
             if [ "$got" != "plakar/$PLAKAR_REF" ]; then
@@ -245,3 +256,39 @@ jobs:
                 "$(du -h "$f" | cut -f1)" "$(cut -d' ' -f1 "$f.sha256")"
             done
           } >>"$GITHUB_STEP_SUMMARY"
+
+  # Hand the packages out: an artifact needs an account to be downloaded, an asset
+  # of a release in a public repository does not.  Only on the scheduled run or on
+  # request, and only for a plakar release tag (release.sh refuses anything else).
+  release:
+    name: release ptar-${{ needs.resolve.outputs.slug }}
+    needs: [resolve, ptar]
+    if: needs.resolve.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # the release, and the tag it creates
+    # Two runs for the same tag must not race to create the same release.
+    concurrency:
+      group: ptar-release-${{ needs.resolve.outputs.slug }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out the packaging
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: packaging/ptar
+
+      - name: Fetch the packages this run built
+        uses: actions/download-artifact@v8
+        with:
+          name: ptar-${{ needs.resolve.outputs.slug }}
+          path: dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIST: ${{ github.workspace }}/dist
+          PLAKAR_REF: ${{ needs.resolve.outputs.ref }}
+          PLAKAR_VERSION: ${{ needs.ptar.outputs.plakar_version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: packaging/ptar/release.sh
