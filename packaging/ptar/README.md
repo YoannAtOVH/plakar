@@ -127,6 +127,10 @@ still verified, and a bad signature is still fatal.
   `go.mod` outgrows the base image fails the build with a clear message instead
   of quietly downloading a toolchain. Today the floor is webdav's `go 1.26.2`;
   raise `PTAR_GO_IMAGE` when that moves.
+- **Static plugins.** `build-ptar.sh` builds with `CGO_ENABLED=0`.  Cross builds
+  never use cgo, but a native one does as soon as a C compiler is around (a
+  GitHub runner has one) and then links against the builder's glibc: the package
+  would not start on Alpine, nor on an older glibc.
 - **Caches.** The Go module and build caches live in a `gocache` volume, so a
   second run skips the downloads.
 - **File ownership.** The build runs as root inside the container and `chown`s

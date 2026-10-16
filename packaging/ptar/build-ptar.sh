@@ -133,7 +133,12 @@ build_one() {
 		cd "$OUT_DIR" || exit 1
 		GOOS=$goos
 		GOARCH=$goarch
-		export GOOS GOARCH
+		# Static plugins.  Cross builds never use cgo, but a native one does as
+		# soon as a C compiler is around -- a GitHub runner has one -- and then
+		# links against the builder's glibc: the package would not start on
+		# Alpine, nor on an older glibc.
+		CGO_ENABLED=0
+		export GOOS GOARCH CGO_ENABLED
 		run_plakar pkg build "$work/recipe.yaml"
 	)
 	rm -rf "$work"
