@@ -228,11 +228,38 @@ $ plakar pkg add -allow-unsigned s3_v1.1.2_linux_amd64.ptar
 - Only a plakar release tag (`vX.Y.Z`) is published, never a branch build.
 - The release is flagged a pre-release as long as one package carries a
   pre-release version (webdav is still an alpha).
-- Publishing again for a tag that has its release replaces its assets and notes;
-  the scheduled run skips such a tag.
 - The packages are unsigned and the notes say so: whoever installs one trusts
-  this repository.  `gh release delete ptar-<tag> --cleanup-tag` takes a release
-  down.
+  this repository.
+
+##### Immutable releases
+
+The fork has release immutability turned on (Settings, Releases; or `gh api -X
+PUT repos/<owner>/<repo>/immutable-releases`).  Once a release is published, its
+assets and its tag are frozen, the tag name can never be used again, and GitHub
+signs an attestation of the release.  The title, the notes and the pre-release
+flag stay editable.  What follows from it:
+
+- `release.sh` creates the release as a draft, uploads the assets, checks the
+  sha256 that GitHub computed for each against the local files, and only then
+  publishes.  `DRAFT_ONLY=1` stops before that last step; nothing is public.
+- A tag that has its release is final.  The scheduled run skips it, and
+  `release.sh` refuses to publish it again.  To ship corrected packages for the
+  same plakar tag, use another release tag: `release.sh` reads it from
+  `RELEASE_TAG` (the workflow does not expose it).  Deleting an immutable release
+  is allowed, but its tag name stays taken.
+- Anyone with `gh` and a GitHub login can check a release and the files they
+  downloaded; fetching them takes no account:
+
+  ```console
+  $ gh release verify ptar-v1.1.7 -R <owner>/<repo>
+  $ gh release verify-asset ptar-v1.1.7 s3_v1.1.2_linux_amd64.ptar -R <owner>/<repo>
+  ```
+
+- The setting only applies to releases published after it was turned on.  An
+  older one becomes immutable only by being published again: delete it but keep
+  its tag (`gh release delete ptar-<tag> --yes`), run `release.sh` with
+  `DRAFT_ONLY=1` on the same files, look at the draft, then `gh release edit
+  ptar-<tag> --draft=false`.
 
 [recipe]: ../../subcommands/pkg/plakar-pkg-recipe.yaml.5
 [direnv]: https://direnv.net

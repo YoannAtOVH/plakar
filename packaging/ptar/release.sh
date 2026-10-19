@@ -9,6 +9,14 @@
 # packaging, and it is flagged as a pre-release when a package carries a
 # pre-release version (webdav is still an alpha).
 #
+# When release immutability is enabled on the repository (Settings > Releases),
+# publishing freezes the release: its assets and its tag can no longer change, the
+# tag name can never be reused, and GitHub signs an attestation that `gh release
+# verify` checks.  Hence the order followed here: create the release as a draft,
+# upload the assets, check that GitHub holds exactly the files that were sent (it
+# computes a sha256 for every asset), and only then publish.  A release that is
+# immutable already is refused; a mutable one has its assets and notes replaced.
+#
 # Run by the `release` job of .github/workflows/ptar.yml, which hands it the
 # packages built by the same run.
 #
@@ -23,6 +31,7 @@
 #   RUN_URL            link to the run that built the packages
 #   RELEASE_TAG        tag of the release                    (default: ptar-$PLAKAR_REF)
 #   DRY_RUN=1          print the release notes and the plan, publish nothing
+#   DRAFT_ONLY=1       create and check the draft, then stop: nothing becomes public
 
 set -eu
 
@@ -39,6 +48,7 @@ PLAKAR_VERSION="${PLAKAR_VERSION:-unknown}"
 RUN_URL="${RUN_URL:-}"
 RELEASE_TAG="${RELEASE_TAG:-ptar-$PLAKAR_REF}"
 DRY_RUN="${DRY_RUN:-}"
+DRAFT_ONLY="${DRAFT_ONLY:-}"
 
 # Only a plakar release gets a public release: a branch build would put a moving
 # target under a name that reads like a version.
@@ -120,6 +130,11 @@ trap 'rm -f "$notes"' EXIT
 	printf '## sha256\n\n%s%s%s\n' "$bt" "$bt" "$bt"
 	cat "$DIST"/*.ptar.sha256
 	printf '%s%s%s\n\n' "$bt" "$bt" "$bt"
+	printf '## Verify\n\nDownloading needs no account.  When this release carries the "Immutable" badge, its tag and its assets can no longer change and GitHub signed an attestation of them.  With %sgh%s (which needs a GitHub login, a free account is enough):\n\n' "$bt" "$bt"
+	printf '%s%s%ssh\n' "$bt" "$bt" "$bt"
+	printf 'gh release verify %s -R %s\n' "$RELEASE_TAG" "$GITHUB_REPOSITORY"
+	printf 'gh release verify-asset %s %s -R %s\n' "$RELEASE_TAG" "$example" "$GITHUB_REPOSITORY"
+	printf '%s%s%s\n\n' "$bt" "$bt" "$bt"
 	printf '## Provenance and licenses\n\n'
 	if [ -n "$RUN_URL" ]; then
 		printf 'Built by %s from commit %s%s%s; the packaging is in %spackaging/ptar%s.\n' \
@@ -155,16 +170,49 @@ export GH_REPO="$GITHUB_REPOSITORY"
 set --
 for f in $ptars; do set -- "$@" "$f" "$f.sha256"; done
 
-if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-	info "release $RELEASE_TAG exists: replacing its assets and notes"
+# check_assets FILE... -- GitHub computes a sha256 for every asset it receives:
+# compare it with the files that were meant to be sent, and count them, before
+# anything is made public.
+check_assets() {
+	remote=$(gh release view "$RELEASE_TAG" --json assets \
+		--jq '.assets[] | "\(.name) \(.digest)"')
+	for f in "$@"; do
+		want=sha256:$(sha256sum "$f" | cut -d' ' -f1)
+		got=$(printf '%s\n' "$remote" | awk -v n="${f##*/}" '$1 == n { print $2 }')
+		[ "$got" = "$want" ] || return 1
+	done
+	[ "$(printf '%s\n' "$remote" | wc -l)" -eq "$#" ]
+}
+
+if state=$(gh release view "$RELEASE_TAG" --json isDraft,isImmutable \
+	--jq '"\(.isDraft) \(.isImmutable)"' 2>/dev/null); then
+	is_draft=${state%% *}
+	is_immutable=${state##* }
+	if [ "$is_draft" = true ]; then
+		die "a draft of $RELEASE_TAG already exists, left by an earlier run: delete it (gh release delete $RELEASE_TAG --yes) and run again"
+	fi
+	if [ "$is_immutable" = true ]; then
+		die "release $RELEASE_TAG is immutable: its assets and its tag cannot change any more. Publish under another tag (RELEASE_TAG=...); deleting the release would not free the tag name"
+	fi
+	info "release $RELEASE_TAG exists and is mutable: replacing its assets and notes"
 	gh release upload "$RELEASE_TAG" "$@" --clobber
+	check_assets "$@" || die "the assets GitHub holds for $RELEASE_TAG differ from the files here"
 	gh release edit "$RELEASE_TAG" --title "$title" --notes-file "$notes" \
 		--prerelease="$prerelease"
 else
-	info "creating release $RELEASE_TAG on $GITHUB_SHA"
+	info "creating the draft of release $RELEASE_TAG (tag on $GITHUB_SHA, unless it exists already)"
 	# shellcheck disable=SC2086 # $pre_flag is either empty or one flag
-	gh release create "$RELEASE_TAG" "$@" --target "$GITHUB_SHA" \
+	gh release create "$RELEASE_TAG" "$@" --draft --target "$GITHUB_SHA" \
 		--title "$title" --notes-file "$notes" $pre_flag
+	check_assets "$@" || die "the assets GitHub holds differ from the files here: the draft is left unpublished, inspect it then delete it (gh release delete $RELEASE_TAG --yes)"
+	info "the $# assets GitHub holds match their sha256"
+	if [ -n "$DRAFT_ONLY" ]; then
+		info "DRAFT_ONLY: left as a draft, nothing is public"
+		exit 0
+	fi
+	info "publishing"
+	gh release edit "$RELEASE_TAG" --draft=false
 fi
 
 info "published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+info "immutable: $(gh release view "$RELEASE_TAG" --json isImmutable --jq .isImmutable)"
