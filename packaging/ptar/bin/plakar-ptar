@@ -39,7 +39,7 @@ Options:
   -h, --help         this message
 
 Environment:
-  PTAR_<NAME>_VERSION   build another tag, e.g. PTAR_S3_VERSION=v1.1.1
+  PTAR_<NAME>_VERSION   build another tag, e.g. PTAR_S3_VERSION=s3/v1.1.9
   PLAKAR_CLONE_TOKEN    forwarded to plakar for private plugin repositories
 EOF
 }

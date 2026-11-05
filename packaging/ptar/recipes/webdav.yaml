@@ -5,8 +5,11 @@
 # subdirectory to build: Recipe.Subdir() splits it off to drive the sparse
 # checkout, Recipe.Semver() keeps the trailing semver for the package name.
 #
+# alpha.4 rejects restore paths that escape the collection, and requires Go
+# 1.26.10, the toolchain that fixes CVE-2026-111943 in crypto/x509.
+#
 # Override without touching this file:
-#   PTAR_WEBDAV_VERSION=webdav/v1.1.0-alpha.2 make ptar-webdav
+#   PTAR_WEBDAV_VERSION=webdav/v1.1.0-alpha.3 make ptar-webdav
 name: webdav
-version: webdav/v1.1.0-alpha.3
+version: webdav/v1.1.0-alpha.4
 repository: https://github.com/PlakarKorp/integrations

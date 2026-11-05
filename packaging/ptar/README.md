@@ -6,7 +6,7 @@ build` produces one from a [recipe][recipe], which is a name, a git repository
 and a tag:
 
 ```console
-$ plakar pkg build recipe.yaml     # -> s3_v1.1.2_linux_amd64.ptar
+$ plakar pkg build recipe.yaml     # -> s3_v1.1.10_linux_amd64.ptar
 ```
 
 Doing that by hand needs plakar, git, make and a Go toolchain new enough for
@@ -20,16 +20,16 @@ your shell history.
 $ direnv allow                    # once, loads the repository .envrc
 $ make ptar                       # s3 + webdav for the host platform
 $ ls dist/plugins
-s3_v1.1.2_linux_amd64.ptar          webdav_v1.1.0-alpha.3_linux_amd64.ptar
-s3_v1.1.2_linux_amd64.ptar.sha256   webdav_v1.1.0-alpha.3_linux_amd64.ptar.sha256
+s3_v1.1.10_linux_amd64.ptar          webdav_v1.1.0-alpha.4_linux_amd64.ptar
+s3_v1.1.10_linux_amd64.ptar.sha256   webdav_v1.1.0-alpha.4_linux_amd64.ptar.sha256
 ```
 
 Then install one locally:
 
 ```console
-$ plakar pkg add -allow-unsigned dist/plugins/s3_v1.1.2_linux_amd64.ptar
+$ plakar pkg add -allow-unsigned dist/plugins/s3_v1.1.10_linux_amd64.ptar
 $ plakar pkg show
-s3@v1.1.2
+s3@v1.1.10
 ```
 
 `-allow-unsigned` is needed because plakar refuses a package without a
@@ -52,7 +52,7 @@ $ cd packaging/ptar && docker compose run --rm ptar webdav
 
 | Path | Role |
 | --- | --- |
-| `recipes/s3.yaml` | S3 connector: storage, importer, exporter — own repository, plain semver tag |
+| `recipes/s3.yaml` | S3 connector: storage, importer, exporter — `integrations` mono-repo, `s3/`-prefixed tag |
 | `recipes/webdav.yaml` | WebDAV connector: importer, exporter — `integrations` mono-repo, `webdav/`-prefixed tag |
 | `Dockerfile` | builder image: plakar from this working tree + git, make, Go |
 | `Dockerfile.dockerignore` | keeps `.git` (130+ MB) out of the build context |
@@ -60,14 +60,15 @@ $ cd packaging/ptar && docker compose run --rm ptar webdav
 | `bin/plakar-ptar` | host wrapper; `docker build` then `docker run` |
 | `docker-compose.yml` | declarative equivalent of the wrapper |
 
-The two recipes differ in a way worth knowing about, because `version` doubles
-as the git tag:
+Both recipes point into the `integrations` mono-repo, and `version` doubles as
+the git tag, so it carries the connector's directory as a prefix: `s3/v1.1.10`,
+`webdav/v1.1.0-alpha.4`.  `plakar pkg build` splits that on the last `/`: the left
+side is the subdirectory to sparse-checkout and build, the right side is the
+semver that names the package.
 
-- `s3` lives in its own repository, tagged `v1.1.2`.
-- `webdav` lives in the `integrations` mono-repo, tagged `webdav/v1.1.0-alpha.3`.
-  `plakar pkg build` splits that on the last `/`: the left side is the
-  subdirectory to sparse-checkout and build, the right side is the semver that
-  names the package.
+s3 used to have a repository of its own, `PlakarKorp/integration-s3`.  Upstream
+removed it in October 2026, and a recipe still pointing there cannot be cloned:
+that is what broke the builds until the recipe moved to the mono-repo.
 
 ## Knobs
 
@@ -80,8 +81,8 @@ All of them are exported by `.envrc` with the defaults below, so a plain
 | `PTAR_DIST` | `dist/plugins` | output directory |
 | `PTAR_GO_IMAGE` | `golang:1.26-alpine3.23` | Go base image of the builder, the newest 1.26.x |
 | `PTAR_IMAGE` | `plakar-ptar-builder:local` | builder image tag |
-| `PTAR_S3_VERSION` | — | build another tag, e.g. `v1.1.1` |
-| `PTAR_WEBDAV_VERSION` | — | build another tag, e.g. `webdav/v1.1.0-alpha.2` |
+| `PTAR_S3_VERSION` | — | build another tag, e.g. `s3/v1.1.9` |
+| `PTAR_WEBDAV_VERSION` | — | build another tag, e.g. `webdav/v1.1.0-alpha.3` |
 | `PLAKAR_CLONE_TOKEN` | — | forwarded to plakar for private plugin repositories |
 
 Put the secrets and the pins in an untracked `.env` (see `.env.example`);
@@ -215,17 +216,17 @@ Worth knowing:
 
 An artifact needs a GitHub account to download.  To hand the packages out without
 one, `release.sh` publishes them as the release `ptar-<tag>` of the fork:
-`ptar-v1.1.7` holds what plakar v1.1.7 assembled, and its tag sits on the commit
+`ptar-v1.1.8` holds what plakar v1.1.8 assembled, and its tag sits on the commit
 that carries the packaging.  The scheduled run does it for each new upstream tag,
 a manual run does with `-f publish=true`.  Anyone can then fetch an asset, no
 account needed:
 
 ```console
-$ base=https://github.com/<owner>/<repo>/releases/download/ptar-v1.1.7
-$ curl -fLO $base/s3_v1.1.2_linux_amd64.ptar
-$ curl -fLO $base/s3_v1.1.2_linux_amd64.ptar.sha256
-$ sha256sum -c s3_v1.1.2_linux_amd64.ptar.sha256
-$ plakar pkg add -allow-unsigned s3_v1.1.2_linux_amd64.ptar
+$ base=https://github.com/<owner>/<repo>/releases/download/ptar-v1.1.8
+$ curl -fLO $base/s3_v1.1.10_linux_amd64.ptar
+$ curl -fLO $base/s3_v1.1.10_linux_amd64.ptar.sha256
+$ sha256sum -c s3_v1.1.10_linux_amd64.ptar.sha256
+$ plakar pkg add -allow-unsigned s3_v1.1.10_linux_amd64.ptar
 ```
 
 - Only a plakar release tag (`vX.Y.Z`) is published, never a branch build.
@@ -254,8 +255,8 @@ flag stay editable.  What follows from it:
   downloaded; fetching them takes no account:
 
   ```console
-  $ gh release verify ptar-v1.1.7 -R <owner>/<repo>
-  $ gh release verify-asset ptar-v1.1.7 s3_v1.1.2_linux_amd64.ptar -R <owner>/<repo>
+  $ gh release verify ptar-v1.1.8 -R <owner>/<repo>
+  $ gh release verify-asset ptar-v1.1.8 s3_v1.1.10_linux_amd64.ptar -R <owner>/<repo>
   ```
 
 - The setting only applies to releases published after it was turned on.  An

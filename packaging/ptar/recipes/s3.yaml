@@ -1,9 +1,17 @@
 # plakar-pkg-recipe.yaml(5) -- S3 connector: storage, importer and exporter.
 #
-# `version` doubles as the git tag to check out.  The S3 connector lives in a
-# repository of its own, so the tag is a plain semver.
+# The S3 connector ships from the `integrations` mono-repo, so `version` carries
+# an `s3/` prefix.  That prefix is both the git tag namespace and the
+# subdirectory to build: Recipe.Subdir() splits it off to drive the sparse
+# checkout, Recipe.Semver() keeps the trailing semver for the package name.
 #
-# Override without touching this file:  PTAR_S3_VERSION=v1.1.1 make ptar-s3
+# It used to have a repository of its own, PlakarKorp/integration-s3, which
+# upstream has removed: a recipe still pointing there cannot be cloned.
+#
+# s3/v1.1.10 is the first s3 tag whose go.mod requires Go 1.26.10, the toolchain
+# that fixes CVE-2026-111943 in crypto/x509.
+#
+# Override without touching this file:  PTAR_S3_VERSION=s3/v1.1.9 make ptar-s3
 name: s3
-version: v1.1.2
-repository: https://github.com/PlakarKorp/integration-s3
+version: s3/v1.1.10
+repository: https://github.com/PlakarKorp/integrations
