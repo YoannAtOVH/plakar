@@ -78,7 +78,7 @@ All of them are exported by `.envrc` with the defaults below, so a plain
 | --- | --- | --- |
 | `PTAR_PLATFORMS` | `linux/amd64` | space separated `os/arch` list to build for |
 | `PTAR_DIST` | `dist/plugins` | output directory |
-| `PTAR_GO_IMAGE` | `golang:1.26.5-alpine3.23` | Go base image of the builder |
+| `PTAR_GO_IMAGE` | `golang:1.26-alpine3.23` | Go base image of the builder, the newest 1.26.x |
 | `PTAR_IMAGE` | `plakar-ptar-builder:local` | builder image tag |
 | `PTAR_S3_VERSION` | — | build another tag, e.g. `v1.1.1` |
 | `PTAR_WEBDAV_VERSION` | — | build another tag, e.g. `webdav/v1.1.0-alpha.2` |
@@ -123,10 +123,13 @@ still verified, and a bad signature is still fatal.
 
 ## Notes on the container
 
-- **Go version.** `GOTOOLCHAIN=local` is set in the image, so a plugin whose
-  `go.mod` outgrows the base image fails the build with a clear message instead
-  of quietly downloading a toolchain. Today the floor is webdav's `go 1.26.2`;
-  raise `PTAR_GO_IMAGE` when that moves.
+- **Go version.** The builder uses the newest Go 1.26.x (`golang:1.26-alpine3.23`;
+  `plakar-ptar --pull` refreshes a stale local copy).  A plugin is linked with
+  the toolchain that builds it, so an old one ships its flaws into the packages:
+  plakar v1.1.8 made Go 1.26.10 its floor, for the fix to CVE-2026-111943 in
+  `crypto/x509`.  `GOTOOLCHAIN=local` is set in the image, so a plugin whose
+  `go.mod` outgrows it (a Go 1.27 floor, say) fails the build with a clear message
+  instead of quietly downloading a toolchain.
 - **Static plugins.** `build-ptar.sh` builds with `CGO_ENABLED=0`.  Cross builds
   never use cgo, but a native one does as soon as a C compiler is around (a
   GitHub runner has one) and then links against the builder's glibc: the package

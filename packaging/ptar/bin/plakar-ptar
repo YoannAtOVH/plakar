@@ -18,7 +18,7 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
 
 : "${PTAR_IMAGE:=plakar-ptar-builder:local}"
-: "${PTAR_GO_IMAGE:=golang:1.26.5-alpine3.23}"
+: "${PTAR_GO_IMAGE:=golang:1.26-alpine3.23}"
 : "${PTAR_DIST:=$repo_root/dist/plugins}"
 : "${PTAR_PLATFORMS:=linux/amd64}"
 : "${PTAR_CACHE_VOLUME:=plakar-ptar-gocache}"

@@ -75,11 +75,15 @@ defaults:
 
 env:
   UPSTREAM_REPO: PlakarKorp/plakar
-  # Keep in step with ARG GO_IMAGE in packaging/ptar/Dockerfile.  The floor is
-  # the webdav connector's go.mod (go 1.26.2); GOTOOLCHAIN=local makes a plugin
-  # that outgrows it fail loudly instead of downloading a toolchain behind our
-  # back.
-  GO_VERSION: '1.26.5'
+  # The newest Go 1.26.x.  plakar v1.1.8 made Go 1.26.10 its floor, for the fix to
+  # CVE-2026-111943 in crypto/x509, and a plugin is linked with the toolchain that
+  # builds it: a stale one ships the flaw into the packages.  A fixed patch
+  # version would go stale with every Go security release, and keep building
+  # vulnerable plugins whenever plakar's own floor does not force the issue.
+  # GOTOOLCHAIN=local keeps a minor bump (Go 1.27) loud: the build fails instead of
+  # downloading a toolchain behind our back.  Keep in step with ARG GO_IMAGE in
+  # packaging/ptar/Dockerfile.
+  GO_VERSION: '1.26'
   GOTOOLCHAIN: local
 
 jobs:
@@ -172,6 +176,9 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          # 1.26 means the newest 1.26.x; this skips an older patch cached on the
+          # runner image.
+          check-latest: true
           cache-dependency-path: plakar/go.sum
 
       # What the build leans on, so that a change of runner image shows in the

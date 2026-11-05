@@ -18,7 +18,7 @@ services:
       context: ../..
       dockerfile: packaging/ptar/Dockerfile
       args:
-        GO_IMAGE: ${PTAR_GO_IMAGE:-golang:1.26.5-alpine3.23}
+        GO_IMAGE: ${PTAR_GO_IMAGE:-golang:1.26-alpine3.23}
     image: ${PTAR_IMAGE:-plakar-ptar-builder:local}
     init: true
     environment:

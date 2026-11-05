@@ -20,9 +20,9 @@ on:
       - 'ptar/*'
 
 env:
-  # Keep in step with ARG GO_IMAGE in packaging/ptar/Dockerfile and with the
-  # `ptar` workflow.
-  GO_VERSION: '1.26.5'
+  # The newest Go 1.26.x, see the `ptar` workflow.  Keep in step with ARG GO_IMAGE
+  # in packaging/ptar/Dockerfile.
+  GO_VERSION: '1.26'
   GOTOOLCHAIN: local
 
 jobs:
@@ -39,6 +39,7 @@ jobs:
       - uses: https://data.forgejo.org/actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
           cache-dependency-path: go.sum
 
       - name: Install build prerequisites

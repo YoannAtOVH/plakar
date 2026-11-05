@@ -14,10 +14,14 @@
 #
 # See packaging/ptar/README.md for the wrappers that do this for you.
 
-# Go 1.26.2 is the floor: that is what the webdav connector's go.mod requires.
-# Bump this when a plugin asks for a newer toolchain -- GOTOOLCHAIN is pinned to
-# `local` below so the build fails loudly instead of silently downloading one.
-ARG GO_IMAGE=golang:1.26.5-alpine3.23
+# The newest Go 1.26.x, whichever it is: plakar v1.1.8 made Go 1.26.10 its floor,
+# for the fix to CVE-2026-111943 in crypto/x509, and a plugin is linked with the
+# toolchain that builds it, so a stale patch version would ship the flaw into the
+# packages.  GOTOOLCHAIN is pinned to `local` below, which keeps a minor bump
+# (Go 1.27) loud: the build fails instead of silently downloading a toolchain.
+# A floating tag is only as fresh as the local copy of the image:
+# `plakar-ptar --pull` refreshes it.
+ARG GO_IMAGE=golang:1.26-alpine3.23
 
 FROM ${GO_IMAGE} AS plakar
 
