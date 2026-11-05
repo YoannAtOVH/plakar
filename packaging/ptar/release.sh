@@ -4,8 +4,8 @@
 #
 # Unlike a workflow artifact, an asset of a release in a public repository can be
 # downloaded by anyone, without an account.  The release is named after the
-# upstream plakar tag the packages were built with: ptar-v1.1.7 holds the packages
-# assembled by plakar v1.1.7.  It is created on the commit that carries the
+# upstream plakar tag the packages were built with: ptar-v1.1.8 holds the packages
+# assembled by plakar v1.1.8.  It is created on the commit that carries the
 # packaging, and it is flagged as a pre-release when a package carries a
 # pre-release version (webdav is still an alpha).
 #
@@ -208,6 +208,11 @@ else
 	info "the $# assets GitHub holds match their sha256"
 	if [ -n "$DRAFT_ONLY" ]; then
 		info "DRAFT_ONLY: left as a draft, nothing is public"
+		info "review it, then publish with: gh release edit $RELEASE_TAG --draft=false -R $GITHUB_REPOSITORY"
+		if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+			printf '### Draft release %s\n\nNothing is public yet.  Review the draft, then publish it with %sgh release edit %s --draft=false -R %s%s.  A published release is immutable.\n' \
+				"$RELEASE_TAG" "$bt" "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$bt" >>"$GITHUB_STEP_SUMMARY"
+		fi
 		exit 0
 	fi
 	info "publishing"

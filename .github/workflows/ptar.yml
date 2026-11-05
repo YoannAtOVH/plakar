@@ -7,13 +7,15 @@
 # release they are meant for.  The recipes and build-ptar.sh come from the fork.
 # Each run uploads one artifact, ptar-<tag>, holding the packages and their
 # checksums; `gh run download --name ptar-<tag>` fetches the latest one.  An
-# artifact needs an account to download, so a run can also publish the packages
-# as the release ptar-<tag> (see release.sh), whose assets anyone can fetch: the
-# scheduled run does, a manual one does with -f publish=true.
+# artifact needs an account to download, so a run can also hand the packages out
+# as the release ptar-<tag> (see release.sh), whose assets anyone can fetch.  A
+# release is immutable once published, so only a manual run publishes it
+# (-f publish=true); the scheduled run leaves a draft to review, and publishing it
+# is `gh release edit ptar-<tag> --draft=false`.
 #
 #     gh workflow run ptar.yml                         # newest stable upstream tag
 #     gh workflow run ptar.yml -f plakar_ref=v1.1.6    # another tag
-#     gh run download --name ptar-v1.1.7               # fetch the packages
+#     gh run download --name ptar-v1.1.8               # fetch the packages
 #     gh workflow run ptar.yml -f runner=ubuntu-26.04  # try another runner image
 #     gh workflow run ptar.yml -f publish=true         # build, then release ptar-<tag>
 #
@@ -49,13 +51,13 @@ on:
         required: false
         default: 'ubuntu-latest'
       publish:
-        description: 'Publish the packages as the GitHub release ptar-<tag> once built (the scheduled run always does).'
+        description: 'Publish the packages as the GitHub release ptar-<tag> once built. The scheduled run only leaves a draft.'
         type: boolean
         required: false
         default: false
   schedule:
-    # Daily, off the hour.  Builds and publishes the newest stable upstream tag
-    # unless its release already exists.
+    # Daily, off the hour.  Builds the newest stable upstream tag and leaves its
+    # release as a draft to review, unless a release or a draft is there already.
     - cron: '23 5 * * *'
   push:
     branches:
@@ -265,8 +267,10 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
 
   # Hand the packages out: an artifact needs an account to be downloaded, an asset
-  # of a release in a public repository does not.  Only on the scheduled run or on
-  # request, and only for a plakar release tag (release.sh refuses anything else).
+  # of a release in a public repository does not.  On request this publishes the
+  # release, which is then immutable; the scheduled run only leaves a draft for a
+  # human to check and publish.  Only for a plakar release tag: release.sh refuses
+  # anything else.
   release:
     name: release ptar-${{ needs.resolve.outputs.slug }}
     needs: [resolve, ptar]
@@ -298,4 +302,6 @@ jobs:
           PLAKAR_REF: ${{ needs.resolve.outputs.ref }}
           PLAKAR_VERSION: ${{ needs.ptar.outputs.plakar_version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # A published release is final: the scheduled run stops at the draft.
+          DRAFT_ONLY: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: packaging/ptar/release.sh

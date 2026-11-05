@@ -185,7 +185,7 @@ and webdav for linux/amd64, darwin/arm64 and windows/amd64) and their `.sha256`;
 | Trigger | Builds |
 | --- | --- |
 | `workflow_dispatch` | the tag given as `plakar_ref`, the newest stable upstream tag when empty; `recipes` and `platforms` narrow or widen the set, `runner` picks the runner image, `publish` releases the packages afterwards |
-| `schedule`, daily | the newest stable upstream tag, and releases it, unless its release already exists |
+| `schedule`, daily | the newest stable upstream tag, and leaves its release as a draft to review, unless a release or a draft exists |
 | `push` to `ptar-packaging`, touching this directory (README excepted) | the newest stable upstream tag |
 
 ```console
@@ -217,9 +217,11 @@ Worth knowing:
 An artifact needs a GitHub account to download.  To hand the packages out without
 one, `release.sh` publishes them as the release `ptar-<tag>` of the fork:
 `ptar-v1.1.8` holds what plakar v1.1.8 assembled, and its tag sits on the commit
-that carries the packaging.  The scheduled run does it for each new upstream tag,
-a manual run does with `-f publish=true`.  Anyone can then fetch an asset, no
-account needed:
+that carries the packaging.  A manual run publishes it with `-f publish=true`.
+The scheduled run, for each new upstream tag, only leaves a *draft*: a published
+release is immutable, so a human checks the packages first, then publishes with
+`gh release edit ptar-<tag> --draft=false`.  While a draft waits, the scheduled run
+leaves that tag alone.  Anyone can then fetch an asset, no account needed:
 
 ```console
 $ base=https://github.com/<owner>/<repo>/releases/download/ptar-v1.1.8
