@@ -94,7 +94,10 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
-      contents: read # to look for an existing release
+      # Write, although this job only reads: GitHub lists a draft release only to
+      # a token that can push, and the scheduled run has to see the draft an earlier
+      # run left, or it would build that tag again every day.
+      contents: write
     outputs:
       ref: ${{ steps.pick.outputs.ref }}
       slug: ${{ steps.pick.outputs.slug }}
